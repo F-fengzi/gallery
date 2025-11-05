@@ -6,7 +6,7 @@
   <title>Gallery</title>
   <meta name="description" content="display many images/videos and fit them on one screen">
   <meta name="author" content="vibes">
-  <meta name="version" content="1.1">
+  <meta name="version" content="1.0">
   <style>
     /* Minimal dark UI */
     :root {
@@ -219,85 +219,6 @@
       display: flex;
       gap: 8px;
     }
-    
-    .zoom-controls button {
-      background-color: rgba(2, 6, 10, 0.6);
-    }
-
-    /* caption for zoom overlay */
-    .zoom-caption {
-      position: fixed;
-      left: calc(12px + env(safe-area-inset-left));
-      bottom: calc(12px + env(safe-area-inset-bottom));
-      z-index: 1100;
-      padding: 4px 8px;
-      border-radius: 6px;
-      font-size: 12px;
-      line-height: 1.2;
-      color: #e8eef8;
-      background: rgba(2, 6, 10, 0.6);
-      pointer-events: none;
-      max-width: 70vw;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    /* drop position indicator for drag-reorder */
-    .reorder-indicator {
-      position: absolute;
-      width: 2px;
-      background: var(--focus-color);
-      box-shadow: 0 0 6px rgba(209, 122, 22, 0.8);
-      z-index: 20;
-      pointer-events: none;
-      display: none;
-    }
-
-    /* Improve touch experience */
-    .viewport, .item, .zoom-overlay {
-      -webkit-user-select: none;
-      user-select: none;
-    }
-    .zoom-overlay {
-      touch-action: none; /* prevent browser gestures during swipe */
-    }
-    .item {
-      touch-action: manipulation; /* avoid double-tap zoom; keep clicks */
-    }
-
-    /* Safe-area for notches (iOS) */
-    .zoom-controls {
-      top: calc(12px + env(safe-area-inset-top));
-      right: calc(12px + env(safe-area-inset-right));
-    }
-
-    /* Mobile-friendly sizing */
-    @media (max-width: 640px), (hover: none) and (pointer: coarse) {
-      header {
-        height: auto;
-        min-height: var(--header-h);
-        padding: 0 8px;
-      }
-      .title {
-        font-size: 14px;
-        flex: 0 0 auto;
-      }
-      .controls {
-        margin-left: 2px;
-        flex: 1 1 auto;
-        overflow-x: auto;
-        overflow-y: hidden;
-        white-space: nowrap; /* keep buttons in single line */
-        -webkit-overflow-scrolling: touch;
-        gap: 6px;
-      }
-      .controls button {
-        flex: 0 0 auto; /* do not shrink, keep width */
-        padding: 6px 8px;
-        font-size: 12px;
-      }
-    }
   </style>
 </head>
 
@@ -335,7 +256,6 @@
       <button id="fsBtn">Enter Fullscreen</button>
       <button id="closeZoomBtn">Close</button>
     </div>
-    <div class="zoom-caption" id="zoomCaption"></div>
   </div>
 
   <script>
@@ -358,9 +278,6 @@
     const DEFAULT_ROWS = 0;
     const TILE_BORDER_PX = 0; // keep in sync with .item border in CSS
     const MIN_ROW_H = 42;
-    // touch gestures
-    const TOUCH_SWIPE_THRESHOLD = 40; // px for swipe actions
-    const LONG_PRESS_MS = 300;        // ms to start reorder on touch
 
     /* ---------- DOM references ---------- */
     const app = document.getElementById('app');
@@ -380,7 +297,6 @@
     const zoomBox = document.getElementById('zoomBox');
     const fsBtn = document.getElementById('fsBtn');
     const closeZoomBtn = document.getElementById('closeZoomBtn');
-    const zoomCaptionEl = document.getElementById('zoomCaption');
 
     /* ---------- state ---------- */
     let items = []; // { name, src, type, wrapper, media, aspect, blob, addedAt }
@@ -389,15 +305,6 @@
     let zoomMirror = null;
     let currentRows = 0;
     let layoutRAF = 0;
-    // drag-reorder state
-    let isReordering = false;
-    let draggingIndex = -1;
-    let draggingItem = null;
-    let dropIndicator = null; // indicator element
-    // touch gesture state
-    let zoomTouch = { active: false, used: false, startX: 0, startY: 0 };
-    let vpTouch = { timer: 0, active: false, startX: 0, startY: 0, targetIdx: -1 };
-    // zoom caption element
 
     /* ---------- layout helpers ---------- */
     function getAvgAspect() {
@@ -538,14 +445,12 @@
       wrapper.style.boxSizing = 'border-box';
       wrapper.dataset.name = name;
       wrapper.tabIndex = -1; // allow programmatic focus if needed
-      wrapper.draggable = true; // enable drag-reorder
 
       let media;
       if (type.startsWith('image/')) {
         media = document.createElement('img');
         media.src = src;
         media.loading = 'lazy';
-        media.decoding = 'async'; // mobile: decode off-main-thread when possible
         media.addEventListener('load', () => {
           const w = media.naturalWidth || 1, h = media.naturalHeight || 1;
           const it = items.find(x => x.media === media);
@@ -805,15 +710,6 @@
       updateFocus();
     }
 
-    // update caption text for zoom overlay
-    function updateZoomCaption(index, w, h) {
-      if (!zoomCaptionEl || index < 0 || index >= items.length) return;
-      const name = items[index].name || 'untitled';
-      const pos = `${index + 1}/${items.length}`;
-      const size = (w && h) ? ` — ${w}×${h}` : '';
-      zoomCaptionEl.textContent = `${name} (${pos})${size}`;
-    }
-
     /* ---------- zoom overlay ---------- */
     function focusZoomMedia() {
       const el = zoomBox.querySelector('.zoom-media');
@@ -835,10 +731,6 @@
         img.className = 'zoom-media';
         img.alt = it.name || '';
         zoomBox.appendChild(img);
-        // set base caption and update when dimensions are ready
-        updateZoomCaption(index);
-        const applyDims = () => { if (img.naturalWidth && img.naturalHeight) updateZoomCaption(index, img.naturalWidth, img.naturalHeight); };
-        if (img.complete) applyDims(); else img.addEventListener('load', applyDims, { once: true });
       } else {
         const srcVideo = it.media;
         const prevMuted = srcVideo.muted;
@@ -885,10 +777,6 @@
         };
         zoomBox.appendChild(zv);
         zv.play().catch(() => { });
-        // set base caption and update when metadata is ready
-        updateZoomCaption(index);
-        const applyDimsCaption = () => { if (zv.videoWidth && zv.videoHeight) updateZoomCaption(index, zv.videoWidth, zv.videoHeight); };
-        if (zv.readyState >= 1) applyDimsCaption(); else zv.addEventListener('loadedmetadata', applyDimsCaption, { once: true });
       }
       zoomOverlay.dataset.index = String(index);
       selectedIndex = index;
@@ -906,21 +794,11 @@
       }
     }
 
-    // Update fullscreen button text based on current state
-    function updateFullscreenButton() {
-      const isFs = document.fullscreenElement === zoomOverlay;
-      fsBtn.textContent = isFs ? 'Exit Fullscreen' : 'Enter Fullscreen';
-    }
-
     function toggleFullscreen() {
       if (!zoomOverlay.classList.contains('active')) return;
-      const isFs = document.fullscreenElement === zoomOverlay;
-      const p = isFs ? document.exitFullscreen() : zoomOverlay.requestFullscreen();
-      // Try to reflect immediately; fullscreenchange listener will ensure final state
-      updateFullscreenButton();
-      p && p.catch(() => {}).finally(updateFullscreenButton);
+      if (!document.fullscreenElement) zoomOverlay.requestFullscreen().catch(() => { });
+      else document.exitFullscreen().catch(() => { });
     }
-
     function closeZoom() {
       zoomOverlay.classList.remove('active');
       if (zoomMirror) { try { zoomMirror.cleanup && zoomMirror.cleanup(); } catch (e) { } zoomMirror = null; }
@@ -934,7 +812,6 @@
       } catch (e) {
         try { viewport.focus(); } catch (e2) {}
       }
-      updateFullscreenButton();
     }
     function escCloseHandler(e) { if (e.key === 'Escape') closeZoom(); }
 
@@ -944,188 +821,21 @@
       zoomOverlay.classList.add('active');
       document.addEventListener('keydown', escCloseHandler);
       focusZoomMedia();
-      updateFullscreenButton();
-    }
-
-    // touch gestures on zoom overlay (swipe left/right to navigate, swipe down to close)
-    function onZoomTouchStart(e) {
-      if (!zoomOverlay.classList.contains('active')) return;
-      if (!e.touches || e.touches.length !== 1) return;
-      const t = e.touches[0];
-      zoomTouch.active = true;
-      zoomTouch.used = false;
-      zoomTouch.startX = t.clientX;
-      zoomTouch.startY = t.clientY;
-    }
-    function onZoomTouchMove(e) {
-      if (!zoomTouch.active || !e.touches || e.touches.length !== 1) return;
-      const t = e.touches[0];
-      const dx = t.clientX - zoomTouch.startX;
-      const dy = t.clientY - zoomTouch.startY;
-      const ax = Math.abs(dx), ay = Math.abs(dy);
-      if (zoomTouch.used) { e.preventDefault(); return; }
-      // horizontal swipe to navigate
-      if (ax > ay && ax > TOUCH_SWIPE_THRESHOLD) {
-        e.preventDefault();
-        zoomTouch.used = true;
-        // swipe left => next, swipe right => prev
-        const delta = dx < 0 ? 1 : -1;
-        // use viewport selection model
-        if (items.length) {
-          selectedIndex = (selectedIndex + delta + items.length) % items.length;
-          updateFocus();
-          setZoomContent(selectedIndex);
-        }
-      }
-      // vertical swipe down to close
-      if (ay > ax && dy > TOUCH_SWIPE_THRESHOLD) {
-        e.preventDefault();
-        zoomTouch.used = true;
-        closeZoom();
-      }
-    }
-    function onZoomTouchEnd() {
-      zoomTouch.active = false;
-      zoomTouch.used = false;
-    }
-
-    // ---------- drag reordering (mouse + touch) ----------
-    function findClosestIndex(x, y) {
-      let best = -1, bestDist = Infinity, bestRect = null;
-      for (let i = 0; i < items.length; i++) {
-        const r = items[i].wrapper.getBoundingClientRect();
-        const cx = r.left + r.width / 2;
-        const cy = r.top + r.height / 2;
-        const dx = cx - x, dy = cy - y;
-        const d = dx * dx + dy * dy;
-        if (d < bestDist) { bestDist = d; best = i; bestRect = r; }
-      }
-      return { index: best, rect: bestRect };
-    }
-    function computeDropIndex(x, y) {
-      if (!items.length) return 0;
-      const { index, rect } = findClosestIndex(x, y);
-      if (index < 0 || !rect) return items.length;
-      const before = x < (rect.left + rect.width / 2);
-      return before ? index : index + 1;
-    }
-    function moveItem(from, to) {
-      if (from < 0 || from >= items.length) return;
-      if (to < 0) to = 0;
-      if (to > items.length) to = items.length;
-      if (to > from) to--; // account for removal
-      if (to === from) return;
-      const moved = items.splice(from, 1)[0];
-      items.splice(to, 0, moved);
-      for (const it of items) viewport.appendChild(it.wrapper);
-      selectedIndex = items.indexOf(moved);
-      updateFocus();
-      scheduleLayout();
-    }
-    function updateReorderIndicator(clientX, clientY) {
-      if (!dropIndicator || !items.length) return;
-      const vpRect = viewport.getBoundingClientRect();
-      const { index, rect } = findClosestIndex(clientX, clientY);
-      if (index < 0 || !rect) {
-        dropIndicator.style.display = 'none';
-        return;
-      }
-      const before = clientX < (rect.left + rect.width / 2);
-      const top = rect.top - vpRect.top;
-      const height = rect.height;
-      const left = (before ? rect.left : rect.right) - vpRect.left;
-
-      dropIndicator.style.top = Math.round(top) + 'px';
-      dropIndicator.style.height = Math.round(height) + 'px';
-      dropIndicator.style.left = Math.round(left - 1) + 'px'; // center 2px line
-      dropIndicator.style.display = 'block';
-    }
-    function endReorder() {
-      if (draggingItem) draggingItem.wrapper.classList.remove('dragging');
-      isReordering = false;
-      draggingIndex = -1;
-      draggingItem = null;
-      app.classList.remove('reordering');
-      if (dropIndicator) dropIndicator.style.display = 'none';
-    }
-
-    // touch long-press reorder on viewport
-    function onViewportTouchStart(e) {
-      if (!e.touches || e.touches.length !== 1) return;
-      const t = e.touches[0];
-      const wrapper = e.target.closest('.item');
-      const idx = wrapper ? items.findIndex(it => it.wrapper === wrapper) : -1;
-      if (idx === -1) return;
-      vpTouch.active = true;
-      vpTouch.startX = t.clientX;
-      vpTouch.startY = t.clientY;
-      vpTouch.targetIdx = idx;
-      // start long-press timer
-      vpTouch.timer = setTimeout(() => {
-        if (!vpTouch.active) return;
-        // activate reorder
-        isReordering = true;
-        app.classList.add('reordering');
-        draggingIndex = vpTouch.targetIdx;
-        draggingItem = items[draggingIndex];
-        if (draggingItem) draggingItem.wrapper.classList.add('dragging');
-        updateReorderIndicator(vpTouch.startX, vpTouch.startY);
-      }, LONG_PRESS_MS);
-    }
-    function onViewportTouchMove(e) {
-      if (!e.touches || e.touches.length !== 1) return;
-      const t = e.touches[0];
-      const dx = t.clientX - vpTouch.startX;
-      const dy = t.clientY - vpTouch.startY;
-      // if finger moved too much before long-press triggers, cancel
-      if (!isReordering && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
-        clearTimeout(vpTouch.timer);
-      }
-      if (isReordering) {
-        e.preventDefault();
-        updateReorderIndicator(t.clientX, t.clientY);
-      }
-    }
-    function onViewportTouchEnd(e) {
-      clearTimeout(vpTouch.timer);
-      if (isReordering) {
-        e.preventDefault();
-        const t = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]);
-        const cx = t ? t.clientX : vpTouch.startX;
-        const cy = t ? t.clientY : vpTouch.startY;
-        const dropIdx = computeDropIndex(cx, cy);
-        moveItem(draggingIndex, dropIdx);
-        endReorder();
-      }
-      vpTouch.active = false;
-      vpTouch.targetIdx = -1;
     }
 
     /* ---------- events ---------- */
     // window resize
     window.addEventListener('resize', scheduleLayout);
-    window.addEventListener('orientationchange', scheduleLayout);
-    if (window.visualViewport) {
-      visualViewport.addEventListener('resize', scheduleLayout);
-    }
-    document.addEventListener('fullscreenchange', updateFullscreenButton);
 
-    // drag & drop / paste (guard when internal reordering)
+    // drag & drop / paste
     ['dragenter', 'dragover'].forEach(ev => {
-      window.addEventListener(ev, e => {
-        if (app.classList.contains('reordering')) { e.preventDefault(); e.stopPropagation(); return; }
-        e.preventDefault(); e.stopPropagation();
-        app.classList.add('drop-active');
-      }, { passive: false });
+      window.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); app.classList.add('drop-active'); }, { passive: false });
     });
     ['dragleave', 'drop'].forEach(ev => {
       window.addEventListener(ev, e => {
-        if (app.classList.contains('reordering')) { e.preventDefault(); e.stopPropagation(); return; }
         e.preventDefault(); e.stopPropagation();
-        if (ev === 'drop') {
-          app.classList.remove('drop-active');
-          handleDataTransfer(e.dataTransfer);
-        } else {
+        if (ev === 'drop') { app.classList.remove('drop-active'); handleDataTransfer(e.dataTransfer); }
+        else {
           if (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
             app.classList.remove('drop-active');
           }
@@ -1220,25 +930,6 @@
       syncZoomToSelection();
     });
 
-    viewport.addEventListener('dragover', (e) => {
-      if (!isReordering) return;
-      e.preventDefault();
-      e.stopPropagation();
-      try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
-      updateReorderIndicator(e.clientX, e.clientY);
-    });
-
-    // touch gestures bindings
-    zoomOverlay.addEventListener('touchstart', onZoomTouchStart, { passive: true });
-    zoomOverlay.addEventListener('touchmove', onZoomTouchMove, { passive: false });
-    zoomOverlay.addEventListener('touchend', onZoomTouchEnd, { passive: true });
-    zoomOverlay.addEventListener('touchcancel', onZoomTouchEnd, { passive: true });
-
-    viewport.addEventListener('touchstart', onViewportTouchStart, { passive: true });
-    viewport.addEventListener('touchmove', onViewportTouchMove, { passive: false });
-    viewport.addEventListener('touchend', onViewportTouchEnd, { passive: false });
-    viewport.addEventListener('touchcancel', onViewportTouchEnd, { passive: false });
-
     // buttons
     addBtn.addEventListener('click', openFilePicker);
     shuffleBtn.addEventListener('click', shuffleItems);
@@ -1251,21 +942,11 @@
     fsBtn.addEventListener('click', toggleFullscreen);
     closeZoomBtn.addEventListener('click', closeZoom);
 
-    // click on overlay backdrop closes zoom
-    zoomOverlay.addEventListener('click', (e) => {
-      if (e.target === zoomOverlay) closeZoom();
-    });
-
     /* ---------- init ---------- */
     updateCountLabel();
     overlay.style.display = 'flex';
     window._addFile = addFile;
-
-    // create the drop indicator and append to viewport
-    dropIndicator = document.createElement('div');
-    dropIndicator.className = 'reorder-indicator';
-    viewport.appendChild(dropIndicator);
-
+    
     const io = new IntersectionObserver((entries) => {
       for (const e of entries) {
         const media = e.target;
