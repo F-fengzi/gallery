@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Gallery</title>
+  <meta name="description" content="display many images/videos and fit them on one screen">
+  <meta name="author" content="vibes">
+  <meta name="version" content="1.0">
+  <style>
+    /* Minimal dark UI */
+    :root {
+      --header-h: 42px;
+      --gap: 3px;
+      --focus-color: #d17a16;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      background: #0f1113;
+      color: #e8eef8;
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial;
+      overflow: hidden;
+    }
+
+    .app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    header {
+      height: var(--header-h);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 12px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent);
+      transition: height 160ms ease, padding 160ms ease, opacity 120ms ease;
+    }
+
+    .header-hidden header {
+      height: 0;
+      opacity: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+
+    .title {
+      font-weight: 600;
+    }
+
+    .controls {
+      margin-left: auto;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    button {
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: inherit;
+      padding: 6px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: transform 100ms ease;
+    }
+    button:active {
+      transform: translateY(1px) scale(0.985);
+    }
+
+    /* small helper text */
+    .muted {
+      opacity: 0.8;
+      font-size: 13px;
+    }
+
+    #uiToggle {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 900;
+      /* lower than zoom overlay (1000) */
+      display: none;
+      opacity: 0.8;
+    }
+
+    .header-hidden #uiToggle {
+      display: inline-block;
+    }
+
+    #uiToggle:hover {
+      opacity: 1;
+    }
+
+    /* Main viewport uses wrapping layout; each .item height is set in JS */
+    .viewport {
+      flex: 1;
+      display: flex;
+      flex-wrap: wrap;
+      align-content: flex-start;
+      justify-content: center;
+      overflow: hidden;
+      position: relative;
+      padding: var(--gap);
+      box-sizing: border-box;
+      outline: none;
+    }
+
+    .item {
+      /* small margin between tiles */
+      margin: var(--gap);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #333;
+      box-sizing: border-box;
+    }
+
+    .item.focused {
+      outline: 2px solid var(--focus-color);
+      z-index: 3;
+    }
+
+    img,
+    video {
+      height: 100%;
+      width: auto;
+      object-fit: contain;
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+    }
+
+    video {
+      outline: none;
+    }
+
+    /* Drop overlay */
+    .drop-overlay {
+      position: absolute;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      color: #bbb;
+      font-size: 14px;
+      background: rgba(0, 0, 0, 0.28);
+      pointer-events: none;
+      border-radius: 8px;
+    }
+
+    .drop-active .drop-overlay {
+      display: flex;
+    }
+
+    /* Zoom overlay (click-to-zoom) */
+    .zoom-overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(2, 6, 10, 0.88);
+      z-index: 1000;
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transition: opacity 160ms ease, visibility 0s linear 160ms;
+    }
+
+    .zoom-overlay.active {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+      transition: opacity 160ms ease;
+    }
+
+    .zoom-box {
+      max-width: 95vw;
+      max-height: 95vh;
+      border-radius: 10px;
+      /* show full media; no cropping */
+      overflow: hidden;
+      background: #000;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7);
+      transform: scale(0.99);
+      transition: transform 160ms ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .zoom-overlay.active .zoom-box {
+      transform: scale(1);
+    }
+
+    /* fit media into viewport */
+    .zoom-media {
+      max-width: 95vw;
+      max-height: 95vh;
+      width: auto;
+      height: auto;
+      object-fit: contain;
+      display: block;
+    }
+
+    .zoom-controls {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      z-index: 1100;
+      display: flex;
+      gap: 8px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app" id="app">
+    <!-- header bar -->
+    <header>
+      <div class="title">Gallery</div>
+
+      <div class="controls">
+        <button id="addBtn" title="Add files">Add</button>
+        <button id="shuffleBtn" title="Shuffle order">Shuffle</button>
+        <button id="sortBtn" title="Sort by name">Sort</button>
+        <button id="deleteBtn" title="Delete selected">Delete</button>
+        <button id="clearBtn" title="Clear all">Clear</button>
+        <button id="toggleAudio" title="Toggle video audio">Unmute</button>
+        <button id="hideHeaderBtn" title="Hide header (H)">Hide</button>
+        <span class="muted" id="countLabel">0 items</span>
+      </div>
+    </header>
+
+    <!-- show UI button only when header is hidden -->
+    <button id="uiToggle" title="Show header (H)">UI</button>
+
+    <!-- viewport receives tiles -->
+    <main class="viewport" id="viewport" tabindex="0" aria-label="Media gallery">
+      <div class="drop-overlay">Drop images or videos here (or paste / Ctrl+O)</div>
+    </main>
+  </div>
+
+  <!-- Zoom overlay (activated on click) -->
+  <div class="zoom-overlay" id="zoomOverlay" role="dialog" aria-modal="true">
+    <div class="zoom-box" id="zoomBox"></div>
+    <div class="zoom-controls" id="zoomControls">
+      <button id="fsBtn">Enter Fullscreen</button>
+      <button id="closeZoomBtn">Close</button>
+    </div>
+  </div>
+
+  <script>
+    /* -----------------------
+       Gallery script
+       - config
+       - DOM refs
+       - state
+       - layout (pack / measure / apply)
+       - feature utils (in order of buttons)
+       - selection & navigation
+       - zoom overlay
+       - events
+       - init
+       -----------------------*/
+
+    /* ---------- config ---------- */
+    const MAX_ITEMS = 120;
+    const GAP_PX = 3;
+    const DEFAULT_ROWS = 0;
+    const TILE_BORDER_PX = 0; // keep in sync with .item border in CSS
+    const MIN_ROW_H = 42;
+
+    /* ---------- DOM references ---------- */
+    const app = document.getElementById('app');
+    const viewport = document.getElementById('viewport');
+    const addBtn = document.getElementById('addBtn');
+    const shuffleBtn = document.getElementById('shuffleBtn');
+    const sortBtn = document.getElementById('sortBtn');
+    const deleteBtn = document.getElementById('deleteBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const toggleAudioBtn = document.getElementById('toggleAudio');
+    const hideHeaderBtn = document.getElementById('hideHeaderBtn');
+    const countLabel = document.getElementById('countLabel');
+    const uiToggle = document.getElementById('uiToggle');
+
+    const overlay = viewport.querySelector('.drop-overlay');
+    const zoomOverlay = document.getElementById('zoomOverlay');
+    const zoomBox = document.getElementById('zoomBox');
+    const fsBtn = document.getElementById('fsBtn');
+    const closeZoomBtn = document.getElementById('closeZoomBtn');
+
+    /* ---------- state ---------- */
+    let items = []; // { name, src, type, wrapper, media, aspect, blob, addedAt }
+    let selectedIndex = -1;
+    let videosMuted = true;
+    let zoomMirror = null;
+    let currentRows = 0;
+    let layoutRAF = 0;
+
+    /* ---------- layout helpers ---------- */
+    function getAvgAspect() {
+      const aspects = items.map(it => it.aspect).filter(a => typeof a === 'number' && isFinite(a));
+      if (!aspects.length) return 4 / 3;
+      let sum = 0, n = 0;
+      for (const a of aspects) { sum += Math.min(2.5, Math.max(0.5, a)); n++; }
+      return (sum / Math.max(1, n)) || (4 / 3);
+    }
+
+    /* packRows: distribute items into rows based on a target height */
+    function packRows(targetH, vw, gapPx, minRowH) {
+      const rows = [];
+      const avgA = getAvgAspect();
+      let row = { indices: [], sumA: 0 };
+      const availableFor = (count) => Math.max(0, vw - count * (gapPx * 2));
+
+      for (let i = 0; i < items.length; i++) {
+        const a = (typeof items[i].aspect === 'number' && isFinite(items[i].aspect)) ? items[i].aspect : avgA;
+        const tentativeSumA = row.sumA + a;
+        const needW = Math.floor(tentativeSumA * targetH);
+        const needWWithMargins = needW + (row.indices.length + 1) * (gapPx * 2) + (row.indices.length + 1) * (TILE_BORDER_PX * 2);
+
+        if (row.indices.length === 0 || needWWithMargins <= vw) {
+          row.indices.push(i);
+          row.sumA = tentativeSumA;
+        } else {
+          const avail = availableFor(row.indices.length);
+          const exactH = row.sumA > 0 ? Math.floor((avail - row.indices.length * (TILE_BORDER_PX * 2)) / row.sumA) : targetH;
+          const rowH = Math.max(minRowH, exactH);
+          rows.push({ indices: row.indices, h: rowH });
+          row = { indices: [i], sumA: a };
+        }
+      }
+
+      if (row.indices.length) {
+        const avail = availableFor(row.indices.length);
+        const rawH = row.sumA > 0 ? Math.floor((avail - row.indices.length * (TILE_BORDER_PX * 2)) / row.sumA) : targetH;
+        const rowH = Math.max(minRowH, Math.min(targetH, rawH));
+        rows.push({ indices: row.indices, h: rowH });
+      }
+
+      return rows;
+    }
+
+    function totalPackedHeight(rows, gapPx) {
+      let h = 0;
+      for (const r of rows) h += r.h + (gapPx * 2);
+      return h;
+    }
+
+    /* main layout: choose best target H via binary search and apply measured widths/heights */
+    function layout() {
+      if (!items.length) return;
+      const gapPx = GAP_PX;
+      const vw = Math.max(1, viewport.clientWidth - gapPx * 2);
+      const vh = viewport.clientHeight;
+
+      if (DEFAULT_ROWS > 0) {
+        const rows = DEFAULT_ROWS;
+        const rowH = Math.max(MIN_ROW_H, Math.floor((vh - (rows * (gapPx * 2))) / rows));
+        const avgA = getAvgAspect();
+        for (const it of items) {
+          const a = (typeof it.aspect === 'number' && isFinite(it.aspect)) ? it.aspect : avgA;
+          const tileW = Math.max(1, Math.floor(a * rowH) + TILE_BORDER_PX * 2);
+          it.wrapper.style.height = rowH + 'px';
+          it.wrapper.style.width = tileW + 'px';
+          it.wrapper.style.flex = '0 0 auto';
+        }
+        return;
+      }
+
+      let lo = MIN_ROW_H, hi = Math.max(MIN_ROW_H, vh), best = MIN_ROW_H, bestRows = [];
+      for (let iter = 0; iter < 14; iter++) {
+        const mid = Math.floor((lo + hi) / 2);
+        const rows = packRows(mid, vw, gapPx, MIN_ROW_H);
+        const totalH = totalPackedHeight(rows, gapPx);
+        if (totalH <= vh) { best = mid; bestRows = rows; lo = mid + 1; } else { hi = mid - 1; }
+      }
+      const rows = bestRows.length ? bestRows : packRows(best, vw, gapPx, MIN_ROW_H);
+
+      const avgA = getAvgAspect();
+      for (let rIdx = 0; rIdx < rows.length; rIdx++) {
+        const r = rows[rIdx];
+        const isLast = (rIdx === rows.length - 1);
+        const count = r.indices.length;
+        const avail = Math.max(0, vw - count * (gapPx * 2));
+        const base = r.indices.map(i => {
+          const a = (typeof items[i].aspect === 'number' && isFinite(items[i].aspect)) ? items[i].aspect : avgA;
+          return Math.max(1, Math.floor(a * r.h) + TILE_BORDER_PX * 2);
+        });
+
+        let targetSum = base.reduce((s, w) => s + w, 0);
+        if (!isLast && targetSum < avail) {
+          let rem = avail - targetSum;
+          for (let k = 0; rem > 0 && k < base.length; k++, rem--) base[k] += 1;
+          targetSum = avail;
+        }
+        const maxTile = Math.max(1, avail - (gapPx * 2));
+        for (let k = 0; k < base.length; k++) base[k] = Math.min(base[k], maxTile);
+
+        for (let k = 0; k < count; k++) {
+          const idx = r.indices[k];
+          items[idx].wrapper.style.height = r.h + 'px';
+          items[idx].wrapper.style.width = base[k] + 'px';
+          items[idx].wrapper.style.flex = '0 0 auto';
+        }
+      }
+    }
+
+    function scheduleLayout() {
+      if (layoutRAF) return;
+      layoutRAF = requestAnimationFrame(() => { layoutRAF = 0; layout(); });
+    }
+
+    /* ---------- feature utils ---------- */
+    function displayNameFor(fileOrName) {
+      if (!fileOrName) return 'untitled';
+      if (typeof fileOrName === 'string') {
+        try {
+          const u = new URL(fileOrName);
+          const seg = u.pathname.split('/').filter(Boolean).pop();
+          return seg || fileOrName.slice(0, 40);
+        } catch (e) {
+          return fileOrName.split('/').pop() || fileOrName;
+        }
+      }
+      return fileOrName.name || 'file';
+    }
+    function addFile(fileOrUrl, type) {
+      const isString = typeof fileOrUrl === 'string';
+      const src = isString ? fileOrUrl : URL.createObjectURL(fileOrUrl);
+      const name = displayNameFor(isString ? fileOrUrl : fileOrUrl.name);
+      const addedAt = Date.now();
+      const wrapper = document.createElement('div');
+      wrapper.className = 'item';
+      wrapper.style.borderRadius = '8px';
+      wrapper.style.boxSizing = 'border-box';
+      wrapper.dataset.name = name;
+      wrapper.tabIndex = -1; // allow programmatic focus if needed
+
+      let media;
+      if (type.startsWith('image/')) {
+        media = document.createElement('img');
+        media.src = src;
+        media.loading = 'lazy';
+        media.addEventListener('load', () => {
+          const w = media.naturalWidth || 1, h = media.naturalHeight || 1;
+          const it = items.find(x => x.media === media);
+          if (it) it.aspect = Math.max(0.01, w / h);
+          scheduleLayout();
+        }, { once: true });
+      } else if (type.startsWith('video/')) {
+        media = document.createElement('video');
+        media.src = src;
+        media.autoplay = true;
+        media.loop = true;
+        media.muted = videosMuted;
+        media.playsInline = true;
+        media.controls = true;
+        media.preload = 'metadata';
+        media.addEventListener('loadedmetadata', () => {
+          const it = items.find(x => x.media === media);
+          if (it) {
+            const w = media.videoWidth || 1, h = media.videoHeight || 1;
+            it.aspect = Math.max(0.01, w / h);
+            scheduleLayout();
+          }
+        }, { once: true });
+        io.observe(media);
+      } else return;
+
+      wrapper.appendChild(media);
+      viewport.appendChild(wrapper);
+      const item = { name, src, type, wrapper, media, aspect: (type.startsWith('image/') ? (media.naturalWidth && media.naturalHeight ? media.naturalWidth / media.naturalHeight : null) : null), blob: !isString, addedAt };
+      items.push(item);
+      enforceMemoryLimit();
+      selectedIndex = items.length - 1;
+      updateFocus();
+      updateCountLabel();
+      scheduleLayout();
+    }
+    function handleFiles(files) {
+      const arr = Array.from(files).filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
+      for (const f of arr) addFile(f, f.type);
+      if (arr.length) overlay.style.display = 'none';
+    }
+    function openFilePicker() {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+      input.accept = 'image/*,video/*';
+      input.onchange = () => { if (input.files && input.files.length) handleFiles(input.files); };
+      input.click();
+    }
+    function handleDataTransfer(dt) {
+      if (!dt) return;
+      if (dt.files && dt.files.length) return handleFiles(dt.files);
+      const itemsDT = dt.items || [];
+      for (const it of itemsDT) {
+        if (it.kind === 'file') {
+          const f = it.getAsFile();
+          if (f && (f.type.startsWith('image/') || f.type.startsWith('video/'))) handleFiles([f]);
+        } else if (it.kind === 'string') {
+          it.getAsString(str => {
+            const url = str.trim();
+            const t = guessTypeFromUrl(url);
+            if (t) addFile(url, t);
+          });
+        }
+      }
+    }
+    function guessTypeFromUrl(url) {
+      const ext = (url.split('?')[0].split('.').pop() || '').toLowerCase();
+      if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) return 'image/' + ext;
+      if (['mp4', 'webm', 'ogg', 'mov', 'm4v'].includes(ext)) return 'video/' + ext;
+      return '';
+    }
+
+    function shuffleItems() {
+      for (let i = items.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [items[i], items[j]] = [items[j], items[i]];
+      }
+      for (const it of items) viewport.appendChild(it.wrapper);
+      selectedIndex = Math.max(0, Math.min(selectedIndex, items.length - 1));
+      updateFocus();
+      scheduleLayout();
+    }
+
+    function sortItemsByName() {
+      items.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+      for (const it of items) viewport.appendChild(it.wrapper);
+      selectedIndex = Math.max(0, Math.min(selectedIndex, items.length - 1));
+      updateFocus();
+      scheduleLayout();
+    }
+
+    function evictItemAt(index) {
+      if (index < 0 || index >= items.length) return;
+      const it = items[index];
+      try { if (it.media && it.media.tagName === 'VIDEO') { it.media.pause(); io.unobserve(it.media); } } catch (e) { }
+      if (it.wrapper && it.wrapper.parentNode) it.wrapper.remove();
+      if (it.blob && typeof it.src === 'string' && it.src.startsWith('blob:')) {
+        try { URL.revokeObjectURL(it.src); } catch (e) { }
+      }
+      items.splice(index, 1);
+      if (selectedIndex >= items.length) selectedIndex = items.length - 1;
+      if (selectedIndex < 0 && items.length) selectedIndex = 0;
+      updateCountLabel();
+    }
+    function enforceMemoryLimit() {
+      while (items.length > MAX_ITEMS) evictItemAt(0);
+    }
+    function deleteSelected() {
+      if (!items.length) return;
+      let idx = selectedIndex;
+      if (zoomOverlay.classList.contains('active') && zoomOverlay.dataset.index) {
+        const z = parseInt(zoomOverlay.dataset.index, 10);
+        if (!Number.isNaN(z)) idx = z;
+      }
+      if (idx < 0 || idx >= items.length) return;
+
+      if (zoomOverlay.classList.contains('active')) closeZoom();
+
+      evictItemAt(idx);
+      updateFocus();
+      scheduleLayout();
+      if (items.length === 0) overlay.style.display = 'flex';
+    }
+    function clearAll() {
+      while (items.length) evictItemAt(0);
+      selectedIndex = -1;
+      currentRows = 0;
+      updateCountLabel();
+      overlay.style.display = 'flex';
+      scheduleLayout();
+    }
+
+    function toggleAudio() {
+      videosMuted = !videosMuted;
+      toggleAudioBtn.textContent = videosMuted ? 'Unmute' : 'Mute';
+      for (const it of items) {
+        if (it.media && it.media.tagName === 'VIDEO') it.media.muted = videosMuted;
+      }
+      if (zoomMirror && zoomMirror.video) {
+        zoomMirror.video.muted = videosMuted;
+      }
+    }
+
+    function toggleHeader(force) {
+      const hidden = force !== undefined ? !!force : !app.classList.contains('header-hidden');
+      app.classList.toggle('header-hidden', hidden);
+      scheduleLayout();
+    }
+
+    function updateCountLabel() {
+      countLabel.textContent = `${items.length} item${items.length === 1 ? '' : 's'}`;
+    }
+
+    /* ---------- selection & navigation ---------- */
+    function buildRows() {
+      const groups = [];
+      const tops = items.map(it => Math.round(it.wrapper.getBoundingClientRect().top));
+      for (let i = 0; i < items.length; i++) {
+        const t = tops[i];
+        let g = groups.find(gr => Math.abs(gr.top - t) <= 3);
+        if (!g) { g = { top: t, indices: [] }; groups.push(g); }
+        g.indices.push(i);
+      }
+      groups.sort((a, b) => a.top - b.top);
+      return groups;
+    }
+
+    function itemCenterX(idx) {
+      const r = items[idx].wrapper.getBoundingClientRect();
+      return r.left + r.width / 2;
+    }
+
+    function updateFocus() {
+      items.forEach((it, idx) => {
+        const focused = idx === selectedIndex;
+        it.wrapper.classList.toggle('focused', focused);
+        it.wrapper.setAttribute('aria-selected', focused ? 'true' : 'false');
+      });
+    }
+
+    function focusMove(direction) {
+      if (!items.length) return;
+      if (selectedIndex < 0) selectedIndex = 0;
+      const rows = buildRows();
+      let rowIdx = 0;
+      for (let r = 0; r < rows.length; r++) {
+        if (rows[r].indices.indexOf(selectedIndex) !== -1) { rowIdx = r; break; }
+      }
+
+      if (direction === 'left') selectedIndex = Math.max(0, selectedIndex - 1);
+      else if (direction === 'right') selectedIndex = Math.min(items.length - 1, selectedIndex + 1);
+      else if (direction === 'up') {
+        if (rowIdx === 0) selectedIndex = Math.max(0, selectedIndex - 1);
+        else {
+          const prevRow = rows[rowIdx - 1].indices;
+          const selCx = itemCenterX(selectedIndex);
+          let best = prevRow[0], bestDist = Math.abs(itemCenterX(prevRow[0]) - selCx);
+          for (let k = 1; k < prevRow.length; k++) {
+            const cand = prevRow[k];
+            const d = Math.abs(itemCenterX(cand) - selCx);
+            if (d < bestDist) { best = cand; bestDist = d; }
+          }
+          selectedIndex = best;
+        }
+      } else if (direction === 'down') {
+        if (rowIdx === rows.length - 1) selectedIndex = Math.min(items.length - 1, selectedIndex + 1);
+        else {
+          const nextRow = rows[rowIdx + 1].indices;
+          const selCx = itemCenterX(selectedIndex);
+          let best = nextRow[0], bestDist = Math.abs(itemCenterX(nextRow[0]) - selCx);
+          for (let k = 1; k < nextRow.length; k++) {
+            const cand = nextRow[k];
+            const d = Math.abs(itemCenterX(cand) - selCx);
+            if (d < bestDist) { best = cand; bestDist = d; }
+          }
+          selectedIndex = best;
+        }
+      }
+      updateFocus();
+    }
+
+    function selectRowEdge(which) {
+      if (!items.length) return;
+      if (selectedIndex < 0) selectedIndex = 0;
+      const rows = buildRows();
+      for (let r = 0; r < rows.length; r++) {
+        const indices = rows[r].indices;
+        if (indices.indexOf(selectedIndex) !== -1) {
+          selectedIndex = (which === 'first') ? indices[0] : indices[indices.length - 1];
+          break;
+        }
+      }
+      updateFocus();
+    }
+
+    function movePage(direction) {
+      if (!items.length) return;
+      if (selectedIndex < 0) selectedIndex = 0;
+      const rows = buildRows();
+      let rowIdx = 0;
+      for (let r = 0; r < rows.length; r++) {
+        if (rows[r].indices.indexOf(selectedIndex) !== -1) { rowIdx = r; break; }
+      }
+      const firstRect = items[0].wrapper.getBoundingClientRect();
+      const rowH = Math.max(1, firstRect.height + GAP_PX * 2);
+      const rowsPerPage = Math.max(1, Math.floor(viewport.clientHeight / rowH));
+      let targetRow = Math.min(Math.max(0, rowIdx + direction * rowsPerPage), rows.length - 1);
+      const selCx = itemCenterX(selectedIndex);
+      const t = rows[targetRow].indices;
+      let best = t[0], bestDist = Math.abs(itemCenterX(t[0]) - selCx);
+      for (let i = 1; i < t.length; i++) {
+        const d = Math.abs(itemCenterX(t[i]) - selCx);
+        if (d < bestDist) { best = t[i]; bestDist = d; }
+      }
+      selectedIndex = best;
+      updateFocus();
+    }
+
+    /* ---------- zoom overlay ---------- */
+    function focusZoomMedia() {
+      const el = zoomBox.querySelector('.zoom-media');
+      if (el) {
+        el.tabIndex = -1;
+        try { el.focus({ preventScroll: true }); } catch (e) { try { el.focus(); } catch (e2) {} }
+      }
+    }
+
+    function setZoomContent(index) {
+      if (index < 0 || index >= items.length) return;
+      if (zoomMirror) { try { zoomMirror.cleanup && zoomMirror.cleanup(); } catch (e) { } zoomMirror = null; }
+      zoomBox.innerHTML = '';
+      const it = items[index];
+
+      if (it.type.startsWith('image/')) {
+        const img = document.createElement('img');
+        img.src = it.src;
+        img.className = 'zoom-media';
+        img.alt = it.name || '';
+        zoomBox.appendChild(img);
+      } else {
+        const srcVideo = it.media;
+        const prevMuted = srcVideo.muted;
+        srcVideo.muted = true;
+        srcVideo.play().catch(() => { });
+        const zv = document.createElement('video');
+        zv.src = it.src;
+        zv.className = 'zoom-media';
+        zv.controls = true;
+        zv.playsInline = true;
+        zv.muted = videosMuted;
+        zv.loop = true;
+        zv.autoplay = true;
+        const applyCT = () => {
+          try {
+            if (Math.abs((zv.currentTime || 0) - (srcVideo.currentTime || 0)) > 0.25) {
+              zv.currentTime = srcVideo.currentTime;
+            }
+          } catch (e) { }
+        };
+        zv.addEventListener('loadedmetadata', applyCT, { once: true });
+        const onSrcPlay = () => { if (zv.paused) zv.play().catch(() => { }); };
+        const onSrcPause = () => { try { zv.pause(); } catch (e) { } };
+        srcVideo.addEventListener('play', onSrcPlay);
+        srcVideo.addEventListener('pause', onSrcPause);
+        const syncTimer = setInterval(applyCT, 200);
+        const onZvPlay = () => { srcVideo.play().catch(() => { }); };
+        const onZvPause = () => { try { srcVideo.pause(); } catch (e) { } };
+        const onZvSeek = () => { try { srcVideo.currentTime = zv.currentTime; } catch (e) { } };
+        zv.addEventListener('play', onZvPlay);
+        zv.addEventListener('pause', onZvPause);
+        zv.addEventListener('seeked', onZvSeek);
+        zoomMirror = {
+          video: zv,
+          cleanup() {
+            clearInterval(syncTimer);
+            srcVideo.removeEventListener('play', onSrcPlay);
+            srcVideo.removeEventListener('pause', onSrcPause);
+            zv.removeEventListener('play', onZvPlay);
+            zv.removeEventListener('pause', onZvPause);
+            zv.removeEventListener('seeked', onZvSeek);
+            srcVideo.muted = prevMuted;
+          }
+        };
+        zoomBox.appendChild(zv);
+        zv.play().catch(() => { });
+      }
+      zoomOverlay.dataset.index = String(index);
+      selectedIndex = index;
+      updateFocus();
+      if (zoomOverlay.classList.contains('active')) {
+        focusZoomMedia();
+      }
+    }
+
+    // Sync zoom overlay content to the current selection
+    function syncZoomToSelection() {
+      if (zoomOverlay.classList.contains('active') &&
+          selectedIndex >= 0 && selectedIndex < items.length) {
+        setZoomContent(selectedIndex);
+      }
+    }
+
+    function toggleFullscreen() {
+      if (!zoomOverlay.classList.contains('active')) return;
+      if (!document.fullscreenElement) zoomOverlay.requestFullscreen().catch(() => { });
+      else document.exitFullscreen().catch(() => { });
+    }
+    function closeZoom() {
+      zoomOverlay.classList.remove('active');
+      if (zoomMirror) { try { zoomMirror.cleanup && zoomMirror.cleanup(); } catch (e) { } zoomMirror = null; }
+      zoomBox.innerHTML = '';
+      delete zoomOverlay.dataset.index;
+      document.removeEventListener('keydown', escCloseHandler);
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => { });
+      // After closing zoom, focus the viewport instead of individual wrappers to keep keyboard navigation consistent
+      try {
+        viewport.focus({ preventScroll: true });
+      } catch (e) {
+        try { viewport.focus(); } catch (e2) {}
+      }
+    }
+    function escCloseHandler(e) { if (e.key === 'Escape') closeZoom(); }
+
+    function openZoom(index) {
+      if (index < 0 || index >= items.length) return;
+      setZoomContent(index);
+      zoomOverlay.classList.add('active');
+      document.addEventListener('keydown', escCloseHandler);
+      focusZoomMedia();
+    }
+
+    /* ---------- events ---------- */
+    // window resize
+    window.addEventListener('resize', scheduleLayout);
+
+    // drag & drop / paste
+    ['dragenter', 'dragover'].forEach(ev => {
+      window.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); app.classList.add('drop-active'); }, { passive: false });
+    });
+    ['dragleave', 'drop'].forEach(ev => {
+      window.addEventListener(ev, e => {
+        e.preventDefault(); e.stopPropagation();
+        if (ev === 'drop') { app.classList.remove('drop-active'); handleDataTransfer(e.dataTransfer); }
+        else {
+          if (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
+            app.classList.remove('drop-active');
+          }
+        }
+      }, { passive: false });
+    });
+    window.addEventListener('paste', (e) => handleDataTransfer(e.clipboardData));
+
+    // keyboard / navigation
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'ArrowLeft') {
+        e.preventDefault();
+        focusMove('left');
+        syncZoomToSelection();
+      }
+      if (e.code === 'ArrowRight') {
+        e.preventDefault();
+        focusMove('right');
+        syncZoomToSelection();
+      }
+      if (e.code === 'ArrowUp') {
+        e.preventDefault();
+        focusMove('up');
+        syncZoomToSelection();
+      }
+      if (e.code === 'ArrowDown') {
+        e.preventDefault();
+        focusMove('down');
+        syncZoomToSelection();
+      }
+      if (e.code === 'Home') {
+        e.preventDefault();
+        selectRowEdge('first');
+        syncZoomToSelection();
+      }
+      if (e.code === 'End') {
+        e.preventDefault();
+        selectRowEdge('last');
+        syncZoomToSelection();
+      }
+      if (e.code === 'PageUp') {
+        e.preventDefault();
+        movePage(-1);
+        syncZoomToSelection();
+      }
+      if (e.code === 'PageDown') {
+        e.preventDefault();
+        movePage(1);
+        syncZoomToSelection();
+      }
+
+      if (e.code === 'Enter' || e.code === 'Space') {
+        if (zoomOverlay.classList.contains('active')) return;
+        if (selectedIndex >= 0 && selectedIndex < items.length) openZoom(selectedIndex);
+      }
+      if (e.code === 'KeyF') {
+        const ae = document.activeElement; if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+        e.preventDefault(); toggleFullscreen();
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyO') { e.preventDefault(); openFilePicker(); }
+      if (e.code === 'Delete' || e.code === 'Backspace') {
+        const ae = document.activeElement; if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+        e.preventDefault(); deleteSelected();
+      }
+      if (e.code === 'KeyM') {
+        const ae = document.activeElement; if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+        e.preventDefault(); toggleAudio();
+      }
+      if (e.code === 'KeyH') {
+        const ae = document.activeElement; if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+        e.preventDefault(); toggleHeader();
+      }
+    });
+
+    // mouse interactions
+    viewport.addEventListener('click', (e) => {
+      const wrapper = e.target.closest('.item'); if (!wrapper) return;
+      const idx = items.findIndex(it => it.wrapper === wrapper); if (idx === -1) return;
+      selectedIndex = idx; updateFocus();
+      syncZoomToSelection();
+    });
+    viewport.addEventListener('dblclick', (e) => {
+      const wrapper = e.target.closest('.item'); if (!wrapper) return;
+      const idx = items.findIndex(it => it.wrapper === wrapper); if (idx === -1) return;
+      openZoom(idx);
+    });
+    viewport.addEventListener('mousedown', (e) => {
+      const wrapper = e.target.closest('.item'); if (!wrapper) return;
+      const idx = items.findIndex(it => it.wrapper === wrapper); if (idx === -1) return;
+      selectedIndex = idx; updateFocus();
+      syncZoomToSelection();
+    });
+
+    // buttons
+    addBtn.addEventListener('click', openFilePicker);
+    shuffleBtn.addEventListener('click', shuffleItems);
+    sortBtn.addEventListener('click', sortItemsByName);
+    deleteBtn.addEventListener('click', deleteSelected);
+    clearBtn.addEventListener('click', clearAll);
+    toggleAudioBtn.addEventListener('click', toggleAudio);
+    hideHeaderBtn.addEventListener('click', () => toggleHeader(true));
+    uiToggle.addEventListener('click', () => toggleHeader(false));
+    fsBtn.addEventListener('click', toggleFullscreen);
+    closeZoomBtn.addEventListener('click', closeZoom);
+
+    /* ---------- init ---------- */
+    updateCountLabel();
+    overlay.style.display = 'flex';
+    window._addFile = addFile;
+    
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        const media = e.target;
+        if (media.tagName !== 'VIDEO') continue;
+        if (e.isIntersecting) media.play().catch(() => { });
+        else try { media.pause(); } catch (e) { }
+      }
+    }, { root: viewport, threshold: 0.25 });
+  </script>
+</body>
+</html>
