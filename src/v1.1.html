@@ -6,7 +6,7 @@
   <title>Gallery</title>
   <meta name="description" content="display many images/videos and fit them on one screen">
   <meta name="author" content="vibes">
-  <meta name="version" content="1.1.1">
+  <meta name="version" content="1.1">
   <style>
     /* Minimal dark UI */
     :root {
@@ -264,7 +264,6 @@
     }
     .item {
       touch-action: manipulation; /* avoid double-tap zoom; keep clicks */
-      -webkit-touch-callout: none; /* disable long press actions on iOS */
     }
 
     /* Safe-area for notches (iOS) */
@@ -366,7 +365,6 @@
     /* ---------- DOM references ---------- */
     const app = document.getElementById('app');
     const viewport = document.getElementById('viewport');
-    const header = document.querySelector('header');
     const addBtn = document.getElementById('addBtn');
     const shuffleBtn = document.getElementById('shuffleBtn');
     const sortBtn = document.getElementById('sortBtn');
@@ -1058,7 +1056,6 @@
       const wrapper = e.target.closest('.item');
       const idx = wrapper ? items.findIndex(it => it.wrapper === wrapper) : -1;
       if (idx === -1) return;
-      e.preventDefault();
       vpTouch.active = true;
       vpTouch.startX = t.clientX;
       vpTouch.startY = t.clientY;
@@ -1112,11 +1109,6 @@
       visualViewport.addEventListener('resize', scheduleLayout);
     }
     document.addEventListener('fullscreenchange', updateFullscreenButton);
-    if (header) {
-      header.addEventListener('transitionend', (e) => {
-        if (e.propertyName === 'height') scheduleLayout();
-      });
-    }
 
     // drag & drop / paste (guard when internal reordering)
     ['dragenter', 'dragover'].forEach(ev => {
@@ -1242,7 +1234,7 @@
     zoomOverlay.addEventListener('touchend', onZoomTouchEnd, { passive: true });
     zoomOverlay.addEventListener('touchcancel', onZoomTouchEnd, { passive: true });
 
-    viewport.addEventListener('touchstart', onViewportTouchStart, { passive: false });
+    viewport.addEventListener('touchstart', onViewportTouchStart, { passive: true });
     viewport.addEventListener('touchmove', onViewportTouchMove, { passive: false });
     viewport.addEventListener('touchend', onViewportTouchEnd, { passive: false });
     viewport.addEventListener('touchcancel', onViewportTouchEnd, { passive: false });
