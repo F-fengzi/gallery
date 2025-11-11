@@ -15,3 +15,7 @@ v1.1.1
 
 - Try to disable long-press actions of background items on some mobile browsers
 - Bad attempt at batter accounting for header hide changes to layout
+
+v1.1.2
+
+- Try to revert a mobile touch action change
